@@ -23,6 +23,137 @@ different places depending on the model.
 In order to make a full sense of the data the OS contains a Python script in `/usr/syno/bin/user.data.collector/synouserdata_hw_monitor`
 which will parse all files from `/run/hwmon` and present all readings in a more user-friendly form.
 
+```python
+#!/usr/bin/python
+
+from subprocess import check_output
+from os import listdir
+import json
+import sys
+import os
+
+COLLECTOR_VERSION_KEY = "collector_version"
+COLLECTOR_VERSION = 1
+
+HW_MON_PATH="/run/hwmon"
+HWMON_CPU_TEMP = "cpu_temperature"
+HWMON_THERMEL_SENSOR = "sys_thermal_sensor"
+HWMON_VOLTAGE_SENSOR = "sys_voltage_sensor"
+HWMON_FAN_SPEED_RPM = "sys_fan_speed_rpm"
+HWMON_HDD_BACKPLANE_STATUS = "hdd_backplane_status"
+HWMON_PSU_STATUS = "psu_status"
+HWMON_CURRENT_SENSOR = "sys_current_sensor"
+HW_MON_LIST=[HWMON_CPU_TEMP, HWMON_THERMEL_SENSOR, HWMON_VOLTAGE_SENSOR, HWMON_FAN_SPEED_RPM, HWMON_HDD_BACKPLANE_STATUS, HWMON_PSU_STATUS, HWMON_CURRENT_SENSOR]
+
+HWMON_CPU_TEMP_NAME = "CPU_Temperature"
+HWMON_SYS_THERMAL_NAME = "System_Thermal_Sensor"
+HWMON_SYS_VOLTAGE_NAME = "System_Voltage_Sensor"
+HWMON_SYS_FAN_RPM_NAME = "System_Fan_Speed_RPM"
+HWMON_PSU1_STATUS_NAME = "PSU_1_Status"
+HWMON_PSU2_STATUS_NAME = "PSU_2_Status"
+HWMON_HDD_BP_STATUS_NAME = "HDD_Backplane_Status"
+HWMON_SYS_CURRENT_NAME = "System_Current_Sensor"
+
+THERMEL_SENSOR_VALID_FIELD_LIST = ["Remote1", "Local", "Remote2", "system", "ADT1 Local", "ADT2 Local"]
+VOLTAGE_SENSOR_VALID_FIELD_LIST = ["VCC", "VPP", "V33", "V5", "V12", "ADT1 V33", "ADT2 V33"]
+HDD_BACKPLANE_VALID_FIELD_LIST = ["hdd_detect", "hdd_enable"]
+PSU_STATUS_VALID_FIELD_LIST = ["power_in", "power_out", "temperature_1", "temperature_2", "temperature_3", "fan_speed", "status", "fan_voltage"]
+CURRENT_SENSOR_VALID_FIELD_LIST = ["ADC"]
+
+def checkHwMonitorSupport(name):
+    if os.path.isfile(HW_MON_PATH + "/" + name + ".json"):
+        return True
+    else:
+        return False
+
+def getHwMonitorJson(name):
+    try:
+        with open(HW_MON_PATH + "/" + name + ".json") as hw_mon_file:
+            return json.load(hw_mon_file)
+    except Exception as e:
+        return False
+
+def checkValidField(origin_json, valid_list):
+    new_json={}
+    for key, value in origin_json.items():
+        if(key in valid_list):
+            new_json[key] = origin_json[key]
+    return new_json
+
+def convertValueToInt(origin_json):
+    for key, value in origin_json.items():
+        origin_json[key]=int(value)
+    return origin_json
+
+def convertHexValueToInt(origin_json):
+    for key, value in origin_json.items():
+        try:
+            tmp_value=int(value, base=16)
+            origin_json[key]=tmp_value
+        except Exception as e:
+            continue
+    return origin_json
+
+def main():
+    result = {
+        COLLECTOR_VERSION_KEY: COLLECTOR_VERSION,
+        HWMON_CPU_TEMP : "",
+        HWMON_THERMEL_SENSOR : "",
+        HWMON_VOLTAGE_SENSOR : "",
+        HWMON_FAN_SPEED_RPM : "",
+        HWMON_HDD_BACKPLANE_STATUS : "",
+        HWMON_PSU_STATUS : [],
+        HWMON_CURRENT_SENSOR : "",
+    }
+    for hw_mon_item in HW_MON_LIST:
+        if checkHwMonitorSupport(hw_mon_item):
+            temp_json = getHwMonitorJson(hw_mon_item)
+            if False == temp_json:
+                continue
+            if HWMON_CPU_TEMP == hw_mon_item:
+                result[HWMON_CPU_TEMP] = []
+                sub_tmp_json=temp_json[HWMON_CPU_TEMP_NAME]
+                for key, value in sub_tmp_json.items():
+                    result[HWMON_CPU_TEMP].append(int(value))
+            elif HWMON_THERMEL_SENSOR == hw_mon_item:
+                target_temp_json=temp_json[HWMON_SYS_THERMAL_NAME]
+                target_temp_json=checkValidField(target_temp_json, THERMEL_SENSOR_VALID_FIELD_LIST)
+                result[HWMON_THERMEL_SENSOR] = convertValueToInt(target_temp_json)
+            elif HWMON_VOLTAGE_SENSOR == hw_mon_item:
+                target_temp_json=temp_json[HWMON_SYS_VOLTAGE_NAME]
+                target_temp_json=checkValidField(target_temp_json, VOLTAGE_SENSOR_VALID_FIELD_LIST)
+                result[HWMON_VOLTAGE_SENSOR] = convertValueToInt(target_temp_json)
+            elif HWMON_FAN_SPEED_RPM == hw_mon_item:
+                result[HWMON_FAN_SPEED_RPM] = []
+                for key, value in temp_json[HWMON_SYS_FAN_RPM_NAME].items():
+                    result[HWMON_FAN_SPEED_RPM].append(int(value))
+            elif HWMON_HDD_BACKPLANE_STATUS == hw_mon_item:
+                target_temp_json=temp_json[HWMON_HDD_BP_STATUS_NAME]
+                target_temp_json=checkValidField(target_temp_json, HDD_BACKPLANE_VALID_FIELD_LIST)
+                result[HWMON_HDD_BACKPLANE_STATUS] = convertValueToInt(target_temp_json)
+            elif HWMON_PSU_STATUS == hw_mon_item:
+                target_temp_json=temp_json[HWMON_PSU1_STATUS_NAME]
+                target_temp_json=checkValidField(target_temp_json, PSU_STATUS_VALID_FIELD_LIST)
+                result[HWMON_PSU_STATUS].append(convertHexValueToInt(target_temp_json))
+
+                target_temp_json=temp_json[HWMON_PSU2_STATUS_NAME]
+                target_temp_json=checkValidField(target_temp_json, PSU_STATUS_VALID_FIELD_LIST)
+                result[HWMON_PSU_STATUS].append(convertHexValueToInt(target_temp_json))
+            elif HWMON_CURRENT_SENSOR == hw_mon_item:
+                target_temp_json=temp_json[HWMON_SYS_CURRENT_NAME]
+                target_temp_json=checkValidField(target_temp_json, CURRENT_SENSOR_VALID_FIELD_LIST)
+                result[HWMON_CURRENT_SENSOR] = convertValueToInt(target_temp_json)
+        else:
+            if HWMON_CPU_TEMP == hw_mon_item or HWMON_FAN_SPEED_RPM == hw_mon_item or HWMON_PSU_STATUS == hw_mon_item:
+                result[hw_mon_item] = []
+            else:
+                result[hw_mon_item] = {}
+    sys.stdout.write(json.dumps(result))
+
+if __name__ == '__main__':
+    main()
+```
+
 #### Sensor types
 [mfgBIOS](mfgbios.md) operations list gives a hint about the list of *type* of sensors supported by the HWMON subsystem:
  - FAN speed (`(*hwmon_get_fan_speed_rpm)(SYNO_HWMON_SENSOR_TYPE *)`)
